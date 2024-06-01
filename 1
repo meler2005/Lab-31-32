@@ -1,0 +1,132 @@
+Завдання 1: Тригер, що запобігає поселенню гостя в кімнату, яка на даний день є заброньованою
+
+DELIMITER $$
+CREATE TRIGGER prevent_double_booking
+BEFORE INSERT ON reservations
+FOR EACH ROW
+BEGIN
+    DECLARE room_occupied INT;
+    SELECT COUNT(*)
+    INTO room_occupied
+    FROM reservations
+    WHERE room_id = NEW.room_id
+      AND NEW.check_in_date BETWEEN check_in_date AND check_out_date;
+    IF room_occupied > 0 THEN
+        SIGNAL SQLSTATE '45000' 
+        SET MESSAGE_TEXT = 'This room is already booked for the given date range.';
+    END IF;
+END$$
+DELIMITER ;
+
+
+
+
+
+Завдання 2: Тригер, який не дає змогу записати дату поселення, яка вже є в минулому
+
+DELIMITER $$
+CREATE TRIGGER prevent_past_checkin
+BEFORE INSERT ON reservations
+FOR EACH ROW
+BEGIN
+    IF NEW.check_in_date < CURDATE() THEN
+        SIGNAL SQLSTATE '45000' 
+        SET MESSAGE_TEXT = 'Check-in date cannot be in the past.';
+    END IF;
+END$$
+DELIMITER ;
+
+
+
+
+
+Завдання 3: Тригер, що забезпечує аудит зміни ціни за проживання та терміну проживання
+Створимо таблицю для аудиту:
+
+CREATE TABLE audit_reservations (
+    audit_id INT AUTO_INCREMENT PRIMARY KEY,
+    reservation_id INT,
+    guest_id INT,
+    change_date DATETIME,
+    old_price DECIMAL(10, 2),
+    new_price DECIMAL(10, 2),
+    old_check_out_date DATE,
+    new_check_out_date DATE
+);
+
+
+
+
+
+Тригер для аудиту:
+
+DELIMITER $$
+CREATE TRIGGER audit_reservation_changes
+BEFORE UPDATE ON reservations
+FOR EACH ROW
+BEGIN
+    IF OLD.price != NEW.price OR OLD.check_out_date != NEW.check_out_date THEN
+        INSERT INTO audit_reservations (
+            reservation_id, guest_id, change_date, old_price, new_price, old_check_out_date, new_check_out_date
+        ) VALUES (
+            OLD.reservation_id, OLD.guest_id, NOW(), OLD.price, NEW.price, OLD.check_out_date, NEW.check_out_date
+        );
+    END IF;
+END$$
+DELIMITER ;
+
+
+
+
+
+Завдання 4: Додаткове завдання
+Інформаційна задача: Створити тригер, який автоматично оновлює статус кімнати до "Зайнята" під час поселення гостя і до "Вільна" після його виїзду.
+Для цього створимо таблицю room_status:
+
+CREATE TABLE room_status (
+    room_id INT PRIMARY KEY,
+    status ENUM('Occupied', 'Available') DEFAULT 'Available'
+);
+
+
+
+
+
+Заповнення початкових статусів:
+
+INSERT INTO room_status (room_id, status)
+SELECT room_id, 'Available' FROM rooms;
+
+
+
+
+
+Тригери для оновлення статусу кімнати:
+
+DELIMITER $$
+CREATE TRIGGER update_room_status_on_checkin
+AFTER INSERT ON reservations
+FOR EACH ROW
+BEGIN
+    UPDATE room_status
+    SET status = 'Occupied'
+    WHERE room_id = NEW.room_id;
+END$$
+DELIMITER ;
+
+
+
+
+
+DELIMITER $$
+CREATE TRIGGER update_room_status_on_checkout
+AFTER UPDATE ON reservations
+FOR EACH ROW
+BEGIN
+    IF NEW.check_out_date < CURDATE() THEN
+        UPDATE room_status
+        SET status = 'Available'
+        WHERE room_id = NEW.room_id;
+    END IF;
+END$$
+DELIMITER ;
